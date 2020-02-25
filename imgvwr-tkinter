@@ -8,6 +8,9 @@ import os
 import random
 import shutil
 
+def display_string(string):
+    return ''.join(c for c in string if ord(c) in range(0x10000))
+
 class ImageContainer(tk.Frame):
     def __init__(self, master, width=640, height=480):
         tk.Frame.__init__(self, master)
@@ -110,7 +113,7 @@ class Lister:
 class ScrollingListbox(tk.Frame):
     def __init__(self, parent, items, *, width=200):
         tk.Frame.__init__(self, parent)
-        self.listvariable = tk.StringVar(value=tuple(items))
+        self.listvariable = tk.StringVar(value=tuple(map(display_string, items)))
 
         self.lbox = tk.Listbox(self, listvariable=self.listvariable,
                 selectmode=tk.EXTENDED,
@@ -209,7 +212,7 @@ class ListPane(tk.Frame):
     def remove(self):
         indeces = self.boxPanel.lbox.curselection()
         self.images[:] = [x for i, x in enumerate(self.images) if i not in indeces]
-        self.names.set(tuple(self.images))
+        self.names.set(tuple(map(display_string, self.images)))
 
     def _procfiles(self, f, action, *, src_only=False):
         target = self.targetDir.get()
@@ -363,7 +366,8 @@ d : scroll right
 
     def load_image(self):
         self.fname = self.images[self.index]
-        self._root().title('{} ({} of {})'.format(self.fname, self.index+1, len(self.images)))
+        self._root().title('{} ({} of {})'.format(
+            display_string(self.fname), self.index+1, len(self.images)))
         try:
             self.orig_image = self.image = PIL.Image.open(self.fname)
         except IOError as e:

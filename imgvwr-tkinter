@@ -219,6 +219,12 @@ class ListPane(tk.Frame):
         errors = []
         procd = []
 
+        if not src_only and not os.path.isdir(target):
+            try:
+                os.mkdir(target)
+            except Exception as e:
+                errors.append(str(e))
+
         for fl in self.images:
             try:
                 if src_only:

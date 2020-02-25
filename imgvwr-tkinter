@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+import tkinter as tk
+from tkinter import ttk
+from tkinter.messagebox import askokcancel, showinfo, showerror
+from tkinter.filedialog import askdirectory
+import PIL.Image, PIL.ImageTk
+import os
+import random
+import shutil
+
+class ImageContainer(tk.Frame):
+    def __init__(self, master, width=640, height=480):
+        tk.Frame.__init__(self, master)
+        self.max_width = width
+        self.max_height = height
+
+        self.canvas = tk.Canvas(self, width=width, height=height)
+        self.canvas.config(highlightthickness=0)
+
+        self.horiz = tk.Scrollbar(self, orient=tk.HORIZONTAL)
+        self.vert = tk.Scrollbar(self, orient=tk.VERTICAL)
+        self.canvas.configure(
+                yscrollcommand=self.vert.set,
+                xscrollcommand=self.horiz.set)
+        self.horiz.configure(command=self.canvas.xview)
+        self.vert.configure(command=self.canvas.yview)
+
+        self.horiz.pack(side=tk.BOTTOM, fill=tk.X)
+        self.vert.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(expand=tk.YES, fill=tk.BOTH)
+
+        self.imgid = None
+
+    def set_image(self, im):
+        if self.imgid != None: self.canvas.delete(self.imgid)
+
+        #TODO add detection for GIF images
+        if im.mode == "1":
+            self.image = PIL.ImageTk.BitmapImage(im, foreground="white")
+        else:
+            self.image = PIL.ImageTk.PhotoImage(im)
+
+        w = self.image.width()
+        h = self.image.height()
+        x = y = 0
+
+        # {x,y}view_moveto take a value in [0.0,1.0] representing the % of
+        # the view that is not visible off the left/top side of the canvas;
+        # max_{width,height} / {w,h} gives the % of the image that is visible,
+        # 1 - that is the % that's not visible, and div by 2 gives the amount
+        # off of one side
+
+        if w < self.max_width:
+            self.canvas.configure(width=w)
+        else:
+            self.canvas.configure(width=self.max_width)
+            x = (1 - self.max_width/w) / 2
+        if h < self.max_height:
+            self.canvas.configure(height=h)
+        else:
+            self.canvas.configure(height=self.max_height)
+            y = (1 - self.max_height/h) / 2
+
+        self.canvas.configure(scrollregion=(0, 0, w, h))
+        self.imgid = self.canvas.create_image(0,0,image=self.image,anchor=tk.NW)
+        self.canvas.xview_moveto(x)
+        self.canvas.yview_moveto(y)
+
+    def set_error(self, message):
+        if self.imgid != None: self.canvas.delete(self.imgid)
+        width=self.max_width
+        height=self.max_height
+        self.canvas.configure(width=width, height=height)
+        self.canvas.configure(scrollregion=(0, 0, 100, 100))
+        self.imgid = self.canvas.create_text(width/2, height/2, text=message)
+        self.canvas.xview_moveto(0)
+        self.canvas.yview_moveto(0)
+
+    def scroll_up(self):
+        self.canvas.yview_scroll(-1, 'units')
+
+    def scroll_down(self):
+        self.canvas.yview_scroll(1, 'units')
+
+    def scroll_right(self):
+        self.canvas.xview_scroll(1, 'units')
+
+    def scroll_left(self):
+        self.canvas.xview_scroll(-1, 'units')
+
+class Lister:
+    def __init__(self, parent):
+        self.parent = parent
+        self.win = tk.Toplevel(parent)
+        self.win.title('File Lists')
+        self.nb = ttk.Notebook(self.win)
+        self.nb.pack()
+        panels = []
+        panel = ListPane(self.nb, parent.images, parent.find_image)
+        self.nb.add(panel, text='All')
+        panels.append(panel)
+        for i in range(1,10):
+            panel = ListPane(self.nb, parent.lists[i], parent.find_image)
+            self.nb.add(panel, text=str(i))
+            panels.append(panel)
+        panel = ListPane(self.nb, parent.lists[0], parent.find_image)
+        self.nb.add(panel, text=str(0))
+        panels.append(panel)
+
+class ScrollingListbox(tk.Frame):
+    def __init__(self, parent, items, *, width=200):
+        tk.Frame.__init__(self, parent)
+        self.listvariable = tk.StringVar(value=tuple(items))
+
+        self.lbox = tk.Listbox(self, listvariable=self.listvariable,
+                selectmode=tk.EXTENDED,
+                width=width)
+
+        for i in range(0,len(items),2):
+            self.lbox.itemconfigure(i, background='#f0f0ff')
+
+        self.horiz = tk.Scrollbar(self, orient=tk.HORIZONTAL)
+        self.vert = tk.Scrollbar(self, orient=tk.VERTICAL)
+        self.lbox.configure(
+                yscrollcommand=self.vert.set,
+                xscrollcommand=self.horiz.set)
+        self.horiz.configure(command=self.lbox.xview)
+        self.vert.configure(command=self.lbox.yview)
+
+        self.horiz.pack(side=tk.BOTTOM, fill=tk.X)
+        self.vert.pack(side=tk.RIGHT, fill=tk.Y)
+        self.lbox.pack(expand=tk.YES, fill=tk.BOTH)
+
+        self.bind('<Button-4>', lambda e: self.scroll_up())
+        self.bind('<Button-5>', lambda e: self.scroll_down())
+
+    def scroll_up(self):
+        self.lbox.yview_scroll(-1, 'units')
+
+    def scroll_down(self):
+        self.lbox.yview_scroll(1, 'units')
+
+class ProcResult:
+    def __init__(self, parent, action, procd, errors):
+        self.parent=parent
+        self.win = tk.Toplevel(parent)
+        self.win.title('File Operation Results')
+        self.frame = tk.Frame(self.win)
+        self.frame.pack()
+
+        self.result_list = ScrollingListbox(self.frame, procd, width=100)
+        self.error_list = ScrollingListbox(self.frame, errors, width=100)
+
+        tk.Label(self.frame, text=action).grid(row=0, column=0)
+        tk.Label(self.frame, text='Errors').grid(row=0, column=1)
+        self.result_list.grid(row=1, column=0)
+        self.error_list.grid(row=1, column=1)
+
+class ListPane(tk.Frame):
+    def __init__(self, parent, images, find_image):
+        tk.Frame.__init__(self, parent)
+        self.images = images
+        self.find_image = find_image
+
+        self.targetDir = tk.StringVar(value=os.getcwd())
+
+        # Pane Init
+        self.boxPanel = ScrollingListbox(self, images)
+        self.buttonPanel = tk.Frame(self)
+
+        self.names = self.boxPanel.listvariable
+
+        # Button Panel Init
+        self.removeButton = tk.Button(self.buttonPanel, text='Remove From List',
+                command=self.remove)
+        self.moveButton   = tk.Button(self.buttonPanel, text='Move',
+                command=self.move)
+        self.copyButton   = tk.Button(self.buttonPanel, text='Copy',
+                command=self.copy)
+        self.linkButton   = tk.Button(self.buttonPanel, text='Link',
+                command=self.link)
+        self.deleteButton = tk.Button(self.buttonPanel, text='Delete',
+                background='red',
+                command=self.delete)
+        self.targetEntry = tk.Entry(self.buttonPanel, width=80,
+                textvariable=self.targetDir)
+        self.browseButton = tk.Button(self.buttonPanel, text='...',
+                command=self.browse)
+
+        # Packing Frames
+        self.boxPanel.pack(expand=tk.YES, fill=tk.BOTH)
+        self.buttonPanel.pack(expand=tk.YES, fill=tk.X)
+
+        # Packing Button Panel
+        self.removeButton.pack(side=tk.LEFT)
+        tk.Label(self.buttonPanel, text='|').pack(side=tk.LEFT)
+        self.moveButton.pack(side=tk.LEFT)
+        self.copyButton.pack(side=tk.LEFT)
+        self.linkButton.pack(side=tk.LEFT)
+        tk.Label(self.buttonPanel, text='to:').pack(side=tk.LEFT)
+        self.targetEntry.pack(side=tk.LEFT)
+        self.browseButton.pack(side=tk.LEFT)
+        tk.Frame(self.buttonPanel).pack(side=tk.LEFT, expand=tk.YES)
+        self.deleteButton.pack(side=tk.LEFT)
+
+        # Binding
+        self.boxPanel.lbox.bind('<<ListboxSelect>>', lambda e: self.show())
+
+    def remove(self):
+        indeces = self.boxPanel.lbox.curselection()
+        self.images[:] = [x for i, x in enumerate(self.images) if i not in indeces]
+        self.names.set(tuple(self.images))
+
+    def _procfiles(self, f, action, *, src_only=False):
+        target = self.targetDir.get()
+        errors = []
+        procd = []
+
+        for fl in self.images:
+            try:
+                if src_only:
+                    f(fl)
+                else:
+                    f(fl, target)
+            except Exception as e:
+                errors.append(str(e))
+            else:
+                procd.append(fl)
+
+        ProcResult(self, action, procd, errors)
+
+    def move(self):
+        self._procfiles(shutil.move, 'Moved')
+
+    def copy(self):
+        self._procfiles(shutil.copy2, 'Copied')
+
+    def link(self):
+        self._procfiles(
+                lambda src, dst: os.link(
+                    src,
+                    os.path.join(dst, os.path.basename(src))),
+                'Linked')
+
+    def delete(self):
+        if askokcancel('Confirm Delete', 'Are you sure you want to delete these files?'):
+            self._procfiles(os.remove, 'Removed', src_only=True)
+
+    def browse(self):
+        target = askdirectory()
+        if target:
+            self.targetDir.set(target)
+
+    def show(self):
+        indeces = self.boxPanel.lbox.curselection()
+        if len(indeces) != 0:
+            image = self.boxPanel.lbox.get(tk.ANCHOR)
+            self.find_image(image)
+
+
+
+class Viewer(tk.Frame):
+    def __init__(self, master, image_names, width, height):
+        tk.Frame.__init__(self, master)
+        self.images = image_names
+
+        self.index = 0
+        self.fname = self.images[self.index]
+
+        self.lists = {
+                0: [],
+                1: [],
+                2: [],
+                3: [],
+                4: [],
+                5: [],
+                6: [],
+                7: [],
+                8: [],
+                9: [],
+        }
+
+        self.icon = ImageContainer(self, width, height)
+        self.icon.pack()
+
+        root = self._root()
+        root.bind('<Key-Escape>', lambda e: self.quit())
+        root.bind('<Button-4>', lambda e: self.icon.scroll_up())
+        root.bind('<Button-5>', lambda e: self.icon.scroll_down())
+
+        root.bind('<Key-q>', lambda e: self.quit())
+        root.bind('<Key-w>', lambda e: self.icon.scroll_up())
+        root.bind('<Key-e>', lambda e: self.show_rand())
+        root.bind('<Key-r>', lambda e: self.zoom_in())
+        root.bind('<Key-t>', lambda e: self.show_cur())
+
+        root.bind('<Key-a>', lambda e: self.icon.scroll_left())
+        root.bind('<Key-s>', lambda e: self.icon.scroll_down())
+        root.bind('<Key-d>', lambda e: self.icon.scroll_right())
+        root.bind('<Key-f>', lambda e: self.show_prev())
+        root.bind('<Key-g>', lambda e: self.show_next())
+        root.bind('<Key-h>', lambda e: self.show_help())
+
+        root.bind('<Key-c>', lambda e: self.show_list())
+        root.bind('<Key-v>', lambda e: self.zoom_out())
+
+        root.bind('<Key-0>', lambda e: self.add_list(0))
+        root.bind('<Key-1>', lambda e: self.add_list(1))
+        root.bind('<Key-2>', lambda e: self.add_list(2))
+        root.bind('<Key-3>', lambda e: self.add_list(3))
+        root.bind('<Key-4>', lambda e: self.add_list(4))
+        root.bind('<Key-5>', lambda e: self.add_list(5))
+        root.bind('<Key-6>', lambda e: self.add_list(6))
+        root.bind('<Key-7>', lambda e: self.add_list(7))
+        root.bind('<Key-8>', lambda e: self.add_list(8))
+        root.bind('<Key-9>', lambda e: self.add_list(9))
+
+        self.focus()
+        self.load_image()
+
+    def show_help(self):
+        s = '''
+q : quit
+g : next
+f : prev
+e : rand
+c : file list
+t : print
+r : zoom in
+v : zoom out
+w : scroll up
+s : scroll down
+a : scroll left
+d : scroll right
+'''
+        showinfo('Help', s)
+
+    def show_list(self):
+        Lister(self)
+
+    def show_next(self):
+        self.index += 1
+        self.index %= len(self.images)
+        self.load_image()
+
+    def show_prev(self):
+        self.index -= 1
+        self.index %= len(self.images)
+        self.load_image()
+
+    def show_rand(self):
+        self.index = random.randrange(len(self.images))
+        self.load_image()
+
+    def find_image(self, iname):
+        try:
+            index = self.images.index(iname)
+        except ValueError:
+            pass
+        else:
+            self.index = index
+            self.load_image()
+
+    def load_image(self):
+        self.fname = self.images[self.index]
+        self._root().title('{} ({} of {})'.format(self.fname, self.index+1, len(self.images)))
+        try:
+            self.orig_image = self.image = PIL.Image.open(self.fname)
+        except IOError as e:
+            self.icon.set_error(str(e))
+            self.image = None
+        else:
+            self.icon.set_image(self.image)
+
+    def zoom_in(self):
+        if self.image != None:
+            w, h = self.image.size
+            w = int(w * 1.1)
+            h = int(h * 1.1)
+            self.scale(w, h)
+
+    def zoom_out(self):
+        if self.image != None:
+            w, h = self.image.size
+            w = int(w * 0.9)
+            h = int(h * 0.9)
+            self.scale(w, h)
+
+    def scale(self, w, h):
+        self.image = self.orig_image.resize((w, h))
+        self.icon.set_image(self.image)
+
+    def show_cur(self):
+        print(self.fname)
+
+    def add_list(self, num):
+        self.lists[num].append(self.fname)
+
+if __name__ == '__main__':
+    import sys
+    root = tk.Tk()
+    viewer = Viewer(root, sys.argv[1:], 1920, 1080)
+    viewer.pack(expand=tk.YES, fill=tk.BOTH)
+    root.mainloop()
+

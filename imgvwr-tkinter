@@ -75,7 +75,8 @@ class ImageContainer(tk.Frame):
         height=self.max_height
         self.canvas.configure(width=width, height=height)
         self.canvas.configure(scrollregion=(0, 0, 100, 100))
-        self.imgid = self.canvas.create_text(width/2, height/2, text=message)
+        self.imgid = self.canvas.create_text(
+                width/2, height/2, text=display_string(message))
         self.canvas.xview_moveto(0)
         self.canvas.yview_moveto(0)
 
